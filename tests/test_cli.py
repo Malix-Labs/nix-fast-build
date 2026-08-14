@@ -202,6 +202,26 @@ def test_flake_and_expr_mutually_exclusive() -> None:
     assert e.value.code == 2
 
 
+def remote_args(sshd: Sshd) -> list[str]:
+    login = pwd.getpwuid(os.getuid()).pw_name
+    return [
+        "--remote",
+        f"{login}@127.0.0.1",
+        "--remote-ssh-option",
+        "Port",
+        str(sshd.port),
+        "--remote-ssh-option",
+        "IdentityFile",
+        sshd.key,
+        "--remote-ssh-option",
+        "StrictHostKeyChecking",
+        "no",
+        "--remote-ssh-option",
+        "UserKnownHostsFile",
+        "/dev/null",
+    ]
+
+
 def test_remote(sshd: Sshd) -> None:
     login = pwd.getpwuid(os.getuid()).pw_name
     rc = cli(
@@ -228,9 +248,83 @@ def test_remote(sshd: Sshd) -> None:
     assert rc == 0
 
 
+def test_remote_out_link_creates_local_symlinks(
+    sshd: Sshd, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flake = TEST_ROOT.parent
+    monkeypatch.chdir(tmp_path)
+    rc = cli(
+        [
+            "--option",
+            "builders",
+            "",
+            "--flake",
+            f"{flake}#checks",
+            "--out-link",
+            "result",
+            *remote_args(sshd),
+        ]
+    )
+    assert rc == 0
+    links = [p for p in tmp_path.iterdir() if p.name.startswith("result-")]
+    assert links
+    for link in links:
+        assert link.is_symlink()
+        assert link.readlink().exists()
+
+
 def test_store_implies_no_link() -> None:
     opts = asyncio.run(parse_args(["--store", "ssh-ng://x"]))
-    assert opts.no_link is True
+    assert opts.out_link is None
+
+
+def test_store_disables_local_builders() -> None:
+    opts = asyncio.run(parse_args(["--store", "ssh-ng://x"]))
+    assert "--builders" in opts.store_args
+    assert opts.store_args[opts.store_args.index("--builders") + 1] == ""
+
+
+def test_default_out_link_is_none() -> None:
+    opts = asyncio.run(parse_args([]))
+    assert opts.out_link is None
+
+
+def test_no_link_is_deprecated_noop() -> None:
+    opts = asyncio.run(parse_args(["--no-link"]))
+    assert opts.out_link is None
+
+
+def test_default_creates_no_result_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flake = TEST_ROOT.parent
+    monkeypatch.chdir(tmp_path)
+    rc = cli(["--option", "builders", "", "--flake", f"{flake}#checks"])
+    assert rc == 0
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_out_link_creates_result_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flake = TEST_ROOT.parent
+    monkeypatch.chdir(tmp_path)
+    rc = cli(
+        [
+            "--option",
+            "builders",
+            "",
+            "--flake",
+            f"{flake}#checks",
+            "--out-link",
+            "result",
+        ]
+    )
+    assert rc == 0
+    links = [p for p in tmp_path.iterdir() if p.name.startswith("result-")]
+    assert links
+    for link in links:
+        assert link.is_symlink()
 
 
 @pytest.mark.parametrize(
@@ -244,6 +338,7 @@ def test_store_implies_no_link() -> None:
         ["--out-link", "my-result"],
         ["--option", "store", "ssh-ng://y"],
         ["--option", "eval-store", "local"],
+        ["--option", "builders", "ssh://b"],
     ],
 )
 def test_store_conflicts(extra_args: list[str]) -> None:
@@ -259,15 +354,7 @@ def test_store_ssh_ng(sshd: Sshd, monkeypatch: pytest.MonkeyPatch) -> None:
         f"-p {sshd.port} -i {sshd.key} "
         f"-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
     )
-    rc = cli(
-        [
-            "--option",
-            "builders",
-            "",
-            "--store",
-            f"ssh-ng://{login}@127.0.0.1",
-        ]
-    )
+    rc = cli(["--store", f"ssh-ng://{login}@127.0.0.1"])
     assert rc == 0
 
 

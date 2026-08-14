@@ -201,6 +201,16 @@ class Build:
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=sys.stderr.fileno())
         return await proc.wait()
 
+    def out_link_args(self, opts: Options) -> list[str]:
+        if opts.out_link is not None:
+            return ["--out-link", opts.out_link + "-" + self.attr]
+        if opts.download_gcroot_dir is not None:
+            return [
+                "--out-link",
+                str(opts.download_gcroot_dir / f"result-{self.attr}"),
+            ]
+        return []
+
     async def download(self, exit_stack: AsyncExitStack, opts: Options) -> int:
         if not opts.remote_url or not opts.download or not self.outputs:
             return 0
@@ -212,6 +222,7 @@ class Build:
                 "--no-check-sigs",
                 "--from",
                 opts.remote_url,
+                *self.out_link_args(opts),
                 *list(self.outputs.values()),
             ]
         )
@@ -265,13 +276,15 @@ async def nix_build(
         ["build", f"{installable}^*", "--keep-going", *opts.options, *opts.store_args]
     )
     args += ["--log-format", "internal-json", "-v"]
-    if opts.no_link:
+    if opts.store is not None:
+        # outputs live in a remote store, a local out-link would dangle
         args += ["--no-link"]
+    elif opts.out_link is not None and opts.remote is None:
+        # with --remote the persistent link is created locally on download
+        args += ["--out-link", opts.out_link + "-" + attr]
     else:
-        args += [
-            "--out-link",
-            opts.out_link + "-" + attr,
-        ]
+        assert opts.build_gcroot_dir is not None
+        args += ["--out-link", str(opts.build_gcroot_dir / f"result-{attr}")]
 
     args += opts.build_args
     args = maybe_remote(args, opts)

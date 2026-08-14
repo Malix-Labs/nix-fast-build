@@ -30,13 +30,13 @@ async def ensure_stop(
     try:
         yield proc
     finally:
-        if proc.returncode is not None:
+        if proc.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 proc.send_signal(signal_no)
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=wait_timeout)
                 except TimeoutError:
-                    print(
+                    print(  # noqa: T201 last-resort diagnostics during shutdown
                         f"Failed to stop process {shlex.join(cmd)}. Killing it.",
                         file=sys.stderr,
                     )

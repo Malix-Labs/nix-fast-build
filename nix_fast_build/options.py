@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import enum
 import json
+import logging
 import multiprocessing
 import os
 import shlex
@@ -9,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .errors import Error
+
+logger = logging.getLogger(__name__)
 
 
 def _deprecated_help(command: str) -> str:
@@ -58,8 +61,11 @@ class Options:
     no_fold: bool = False
     stall_timeout: float = 300.0
     download: bool = True
-    no_link: bool = False
-    out_link: str = "result"
+    out_link: str | None = None
+    # Set at runtime; roots vanish with the run's temp dir
+    build_gcroot_dir: Path | None = None
+    # Local counterpart for --remote: roots downloaded outputs
+    download_gcroot_dir: Path | None = None
     stream_json_lines: bool = False
     result_format: ResultFormat = ResultFormat.JSON
     result_file: Path | None = None
@@ -95,7 +101,7 @@ class Options:
         return _nix_command(self.nix_bin, args)
 
     @property
-    def remote_url(self) -> None | str:
+    def remote_url(self) -> str | None:
         if self.remote is None:
             return None
         return f"ssh://{self.remote}"
@@ -105,8 +111,9 @@ class Options:
         """Extra args to point nix build/log at the build store."""
         if self.store is None:
             return []
-        # --eval-store auto ensures nix finds locally-evaluated .drvs
-        return ["--eval-store", "auto", "--store", self.store]
+        # eval-store auto finds locally-evaluated .drvs; empty builders
+        # keeps the client from dispatching to nix.conf remote builders.
+        return ["--eval-store", "auto", "--store", self.store, "--builders", ""]
 
     @property
     def display_name(self) -> str:
@@ -325,7 +332,7 @@ async def parse_args(args: list[str]) -> Options:
     parser.add_argument(
         "--no-link",
         help=_deprecated_help("--build-args=--no-link")
-        + "Do not create an out-link for builds (default: false)",
+        + "Deprecated no-op: not creating out-links is now the default",
         action="store_true",
         default=False,
         deprecated=True,
@@ -333,15 +340,17 @@ async def parse_args(args: list[str]) -> Options:
     parser.add_argument(
         "--out-link",
         help=_deprecated_help("--build-args=--out-link")
-        + "Name of the out-link for builds (default: result)",
-        default="result",
+        + "Create persistent result symlinks with this name prefix (e.g. 'result'). "
+        "By default builds are only gc-rooted for the duration of the run.",
+        default=None,
         deprecated=True,
     )
     parser.add_argument(
         "--store",
         type=str,
         help="Nix store URL to build against (e.g. ssh-ng://host). "
-        "Evaluation stays local; only builds are dispatched. Implies --no-link.",
+        "Evaluation stays local and only builds are dispatched. "
+        "Implies --builders ''. Conflicts with --out-link.",
     )
     parser.add_argument(
         "--remote",
@@ -471,13 +480,19 @@ async def parse_args(args: list[str]) -> Options:
             (a.cachix_cache, "--cachix-cache"),
             (a.attic_cache, "--attic-cache"),
             (a.niks3_server, "--niks3-server"),
-            (a.out_link != "result", "--out-link"),
+            (a.out_link is not None, "--out-link"),
         ]
         for value, flag in conflicts:
             if value:
                 parser.error(f"{flag} cannot be used with --store")
-        if any(name in ("store", "eval-store") for name, _ in a.option):
-            parser.error("--option store/eval-store conflicts with --store")
+        if any(name in ("store", "eval-store", "builders") for name, _ in a.option):
+            parser.error("--option store/eval-store/builders conflicts with --store")
+
+    if a.no_link:
+        logger.warning(
+            "--no-link is deprecated and has no effect: "
+            "not creating out-links is now the default"
+        )
 
     # Validate: --remote is not supported in non-flake mode
     if eval_mode == EvalMode.EXPR and a.remote:
@@ -587,7 +602,6 @@ async def parse_args(args: list[str]) -> Options:
         attic_push_build_closure=a.attic_push_build_closure,
         niks3_server=a.niks3_server,
         store=a.store,
-        no_link=a.no_link or bool(a.store),
         out_link=a.out_link,
         stream_json_lines=a.stream_json_lines,
         result_format=ResultFormat[a.result_format.upper()],
