@@ -8,6 +8,9 @@
 
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    nix-eval-jobs.url = "github:Malix-Labs/nix-eval-jobs/shallow-cache-status";
+    nix-eval-jobs.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -33,7 +36,9 @@
             ...
           }:
           {
-            packages.nix-fast-build = pkgs.callPackage ./default.nix { };
+            packages.nix-fast-build = pkgs.callPackage ./default.nix {
+              nix-eval-jobs = inputs.nix-eval-jobs.packages.${pkgs.stdenv.hostPlatform.system}.default;
+            };
             legacyPackages = {
               hello-broken = pkgs.hello.overrideAttrs (_old: {
                 meta.broken = true;

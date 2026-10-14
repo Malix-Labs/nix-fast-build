@@ -6,10 +6,9 @@
   bashInteractive,
 }:
 let
-  path = lib.makeBinPath [
-    nix-eval-jobs
-    nix-eval-jobs.nix
-  ];
+  path = lib.makeBinPath (
+    [ nix-eval-jobs ] ++ (lib.optional (nix-eval-jobs ? nix) nix-eval-jobs.nix)
+  );
 in
 python3Packages.buildPythonApplication {
   pname = "nix-fast-build";
