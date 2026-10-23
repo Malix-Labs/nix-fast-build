@@ -10,7 +10,6 @@
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
 
     nix-eval-jobs.url = "github:Malix-Labs/nix-eval-jobs/shallow-cache-status";
-    nix-eval-jobs.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
