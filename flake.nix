@@ -8,6 +8,8 @@
 
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    nix-eval-jobs.url = "github:NixOS/nix-eval-jobs/pull/483/head";
   };
 
   outputs =
@@ -33,7 +35,9 @@
             ...
           }:
           {
-            packages.nix-fast-build = pkgs.callPackage ./default.nix { };
+            packages.nix-fast-build = pkgs.callPackage ./default.nix {
+              nix-eval-jobs = inputs.nix-eval-jobs.packages.${pkgs.stdenv.hostPlatform.system}.default;
+            };
             legacyPackages = {
               hello-broken = pkgs.hello.overrideAttrs (_old: {
                 meta.broken = true;
